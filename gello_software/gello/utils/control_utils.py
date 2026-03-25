@@ -95,6 +95,7 @@ class SaveInterface:
         print("Save interface enabled. Use keyboard controls:")
         print("  S: Start recording")
         print("  Q: Stop recording")
+        print("  ESC: Close window and exit")
 
     def update(self, obs: Dict[str, Any], action: np.ndarray) -> Optional[str]:
         """Update save interface and handle saving.
@@ -118,6 +119,18 @@ class SaveInterface:
             )
             self.save_path.mkdir(parents=True, exist_ok=True)
             print(f"Saving to {self.save_path}")
+            # Create a user-editable camera name map template.
+            # Users can edit this file while recording; save_frame() hot-reloads it each frame.
+            try:
+                map_path = self.save_path / "camera_name_map.json"
+                if not map_path.exists():
+                    cam_prefixes = sorted({k.split("_", 1)[0] for k in obs.keys() if k.startswith("cam") and "_" in k})
+                    template = {c: c for c in cam_prefixes}
+                    map_path.write_text(__import__("json").dumps(template, indent=2, sort_keys=True))
+                    if len(template) > 0:
+                        print(f"  (edit) camera name map: {map_path}")
+            except Exception:
+                pass
         elif state == "save":
             if self.save_path is not None:
                 save_frame(self.save_path, dt, obs, action)

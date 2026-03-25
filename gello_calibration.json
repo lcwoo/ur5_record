@@ -1,0 +1,15 @@
+{
+  "/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTA2U0WN-if00-port0": {
+    "joint_offsets": [
+      4.741189955821631,
+      1.7867523431630197,
+      1.5636719317085483,
+      1.4029366048149665,
+      6.367886594087683,
+      14.104949962404417,
+      0.0
+    ],
+    "note": "Fixed calibration offsets for GELLO leader. Capture with robot at observe + leader at home.",
+    "saved_at_unix_s": 1774444398.71773
+  }
+}

@@ -3,6 +3,7 @@ dm_control
 dynamixel_sdk
 omegaconf==2.3.0
 Pillow
+opencv-python-headless
 pin==3.7.0
 pygame
 pyspacemouse

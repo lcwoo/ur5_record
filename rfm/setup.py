@@ -29,6 +29,9 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'rfm-rs-pub = rfm.cameras.realsense_ros_multi_publisher:main',
+            'rfm-ros-record = rfm.data.ros_dataset_recorder:main',
+            'rfm-web = rfm.web.ros_mjpeg_server:main',
         ],
     },
 )

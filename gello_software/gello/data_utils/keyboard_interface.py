@@ -7,6 +7,7 @@ GREEN = (0, 255, 0)
 KEY_START = pygame.K_s
 KEY_CONTINUE = pygame.K_c
 KEY_QUIT_RECORDING = pygame.K_q
+KEY_EXIT = pygame.K_ESCAPE
 
 
 class KBReset:
@@ -18,6 +19,13 @@ class KBReset:
 
     def update(self) -> str:
         pressed_last = self._get_pressed()
+        if "quit" in pressed_last:
+            # Close pygame window and signal outer loop to exit.
+            try:
+                pygame.quit()
+            except Exception:
+                pass
+            return "quit"
         if KEY_QUIT_RECORDING in pressed_last:
             self._set_color(RED)
             self._saved = False
@@ -38,6 +46,10 @@ class KBReset:
         pressed = []
         pygame.event.pump()
         for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pressed.append("quit")
+            if event.type == pygame.KEYDOWN and event.key == KEY_EXIT:
+                pressed.append("quit")
             if event.type == pygame.KEYDOWN:
                 pressed.append(event.key)
         return pressed

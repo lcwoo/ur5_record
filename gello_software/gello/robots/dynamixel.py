@@ -133,6 +133,21 @@ class DynamixelRobot(Robot):
 
         return pos
 
+    def get_joint_offsets(self) -> np.ndarray:
+        """Return the internal joint offsets used to compute reported joint_state."""
+        return self._joint_offsets.copy()
+
+    def set_joint_offsets(self, joint_offsets: Sequence[float]) -> None:
+        """Set the internal joint offsets (useful for loading a saved calibration)."""
+        jo = np.array(list(joint_offsets), dtype=float)
+        if jo.shape != self._joint_offsets.shape:
+            raise ValueError(
+                f"joint_offsets shape mismatch: expected {self._joint_offsets.shape}, got {jo.shape}"
+            )
+        self._joint_offsets = jo
+        # Reset smoothing so we don't blend old/new coordinate frames.
+        self._last_pos = None
+
     def command_joint_state(self, joint_state: np.ndarray) -> None:
         self._driver.set_joints((joint_state + self._joint_offsets).tolist())
 

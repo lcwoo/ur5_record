@@ -7,16 +7,19 @@ import numpy as np
 from gello.cameras.camera import CameraDriver
 
 
-def get_device_ids() -> List[str]:
+def get_device_ids(reset: bool = False) -> List[str]:
     import pyrealsense2 as rs
 
     ctx = rs.context()
     devices = ctx.query_devices()
     device_ids = []
     for dev in devices:
-        dev.hardware_reset()
+        if reset:
+            # Hardware reset can temporarily disconnect devices. Only use when explicitly requested.
+            dev.hardware_reset()
         device_ids.append(dev.get_info(rs.camera_info.serial_number))
-    time.sleep(2)
+    if reset:
+        time.sleep(2)
     return device_ids
 
 
@@ -24,28 +27,87 @@ class RealSenseCamera(CameraDriver):
     def __repr__(self) -> str:
         return f"RealSenseCamera(device_id={self._device_id})"
 
-    def __init__(self, device_id: Optional[str] = None, flip: bool = False):
+    def __init__(
+        self,
+        device_id: Optional[str] = None,
+        flip: bool = False,
+        width: int = 640,
+        height: int = 480,
+        fps: int = 30,
+        enable_depth: bool = True,
+        strict_profile: bool = False,
+    ):
         import pyrealsense2 as rs
 
         self._device_id = device_id
+        self._enable_depth = bool(enable_depth)
 
-        if device_id is None:
-            ctx = rs.context()
-            devices = ctx.query_devices()
-            for dev in devices:
-                dev.hardware_reset()
-            time.sleep(2)
-            self._pipeline = rs.pipeline()
-            config = rs.config()
+        # NOTE: requested profiles are not always supported across mixed RealSense models.
+        # "Couldn't resolve requests" means the requested stream configuration cannot be satisfied.
+        # We try the requested profile first. If strict_profile=True, we do NOT fall back.
+        # If we do fall back, we never increase FPS above the requested FPS (to avoid extra load).
+        req_w, req_h, req_f = int(width), int(height), int(fps)
+        if strict_profile:
+            profiles_to_try = [(req_w, req_h, req_f)]
         else:
-            self._pipeline = rs.pipeline()
-            config = rs.config()
-            config.enable_device(device_id)
+            profiles_to_try = [
+                (req_w, req_h, req_f),
+                # Prefer same FPS first, then lower FPS. Never try higher than req_f.
+                (640, 480, min(15, req_f)),
+                (640, 480, min(30, req_f)),
+                (640, 360, min(15, req_f)),
+                (640, 360, min(30, req_f)),
+                (848, 480, min(15, req_f)),
+                (848, 480, min(30, req_f)),
+                (424, 240, min(15, req_f)),
+                (424, 240, min(30, req_f)),
+            ]
+            # Deduplicate while preserving order.
+            seen = set()
+            profiles_to_try = [p for p in profiles_to_try if not (p in seen or seen.add(p))]
 
-        config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
-        config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
-        self._pipeline.start(config)
+        last_err: Optional[Exception] = None
+        started = False
+        for (w, h, f) in profiles_to_try:
+            # Camera bring-up can be flaky when multiple devices start simultaneously.
+            # Retry a few times per profile.
+            for _ in range(5):
+                try:
+                    pipeline = rs.pipeline()
+                    config = rs.config()
+                    if device_id is not None:
+                        config.enable_device(device_id)
+                    if self._enable_depth:
+                        config.enable_stream(rs.stream.depth, w, h, rs.format.z16, f)
+                    config.enable_stream(rs.stream.color, w, h, rs.format.bgr8, f)
+                    pipeline.start(config)
+                    self._pipeline = pipeline
+                    started = True
+                    last_err = None
+                    if (w, h, f) != (int(width), int(height), int(fps)):
+                        print(
+                            f"[realsense_camera] device_id={device_id} "
+                            f"requested {int(width)}x{int(height)}@{int(fps)} "
+                            f"-> using {w}x{h}@{f} (supported fallback)"
+                        )
+                    break
+                except Exception as e:
+                    last_err = e
+                    time.sleep(0.3)
+            if started:
+                break
+
+        if not started:
+            if strict_profile:
+                raise RuntimeError(
+                    f"Couldn't resolve requests for device_id={device_id} "
+                    f"with strict profile {req_w}x{req_h}@{req_f} (enable_depth={self._enable_depth}): {last_err}"
+                )
+            raise last_err if last_err is not None else RuntimeError("Failed to start RealSense pipeline")
+
         self._flip = flip
+        # Cache last successfully read frame so transient dropouts don't stall the whole system.
+        self._last_frame: Optional[Tuple[np.ndarray, np.ndarray]] = None
 
     def read(
         self,
@@ -63,26 +125,61 @@ class RealSenseCamera(CameraDriver):
         """
         import cv2
 
-        frames = self._pipeline.wait_for_frames()
-        color_frame = frames.get_color_frame()
-        color_image = np.asanyarray(color_frame.get_data())
-        depth_frame = frames.get_depth_frame()
-        depth_image = np.asanyarray(depth_frame.get_data())
-        # depth_image = cv2.convertScaleAbs(depth_image, alpha=0.03)
-        if img_size is None:
-            image = color_image[:, :, ::-1]
-            depth = depth_image
-        else:
-            image = cv2.resize(color_image, img_size)[:, :, ::-1]
-            depth = cv2.resize(depth_image, img_size)
+        # NOTE: librealsense can occasionally fail to deliver frames when many devices
+        # are running (USB bandwidth / transient sync issues). If we raise here, the
+        # ZMQ camera server dies and the client can hang waiting for a reply.
+        #
+        # So we retry a few times, and fall back to last good frame (or zeros).
+        last_err: Optional[Exception] = None
+        for _ in range(3):
+            try:
+                frames = self._pipeline.wait_for_frames(15000)  # timeout_ms
+                color_frame = frames.get_color_frame()
+                depth_frame = frames.get_depth_frame() if self._enable_depth else None
+                if not color_frame or (self._enable_depth and not depth_frame):
+                    last_err = RuntimeError("Missing color/depth frame")
+                    time.sleep(0.05)
+                    continue
 
-        # rotate 180 degree's because everything is upside down in order to center the camera
-        if self._flip:
-            image = cv2.rotate(image, cv2.ROTATE_180)
-            depth = cv2.rotate(depth, cv2.ROTATE_180)[:, :, None]
-        else:
-            depth = depth[:, :, None]
+                color_image = np.asanyarray(color_frame.get_data())
+                if self._enable_depth:
+                    depth_image = np.asanyarray(depth_frame.get_data())  # type: ignore[union-attr]
+                else:
+                    # Placeholder depth (will be uint16 like real depth)
+                    depth_image = np.zeros((color_image.shape[0], color_image.shape[1]), dtype=np.uint16)
 
+                if img_size is None:
+                    image = color_image[:, :, ::-1]
+                    depth = depth_image
+                else:
+                    image = cv2.resize(color_image, img_size)[:, :, ::-1]
+                    depth = cv2.resize(depth_image, img_size)
+
+                # rotate 180 degree's because everything is upside down in order to center the camera
+                if self._flip:
+                    image = cv2.rotate(image, cv2.ROTATE_180)
+                    depth = cv2.rotate(depth, cv2.ROTATE_180)[:, :, None]
+                else:
+                    depth = depth[:, :, None]
+
+                self._last_frame = (image, depth)
+                return image, depth
+            except Exception as e:
+                last_err = e
+                time.sleep(0.1)
+
+        # Fallback: last known good frame, otherwise a black frame with correct shape.
+        if self._last_frame is not None:
+            return self._last_frame
+
+        h, w = (480, 640) if img_size is None else (int(img_size[1]), int(img_size[0]))
+        image = np.zeros((h, w, 3), dtype=np.uint8)
+        depth = np.zeros((h, w, 1), dtype=np.uint16)
+        # Keep a small hint in logs (but don't spam).
+        if last_err is not None:
+            # Print once per instance by caching last_frame (still None here).
+            print(f"[realsense_camera] warning: returning blank frame for device_id={self._device_id}: {last_err}")
+        self._last_frame = (image, depth)
         return image, depth
 
 

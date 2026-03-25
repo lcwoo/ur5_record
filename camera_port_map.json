@@ -1,0 +1,42 @@
+[
+  {
+    "device_id": "218622271492",
+    "name": "wrist",
+    "port": 5000
+  },
+  {
+    "device_id": "033422070567",
+    "name": "front_right45",
+    "port": 5001
+  },
+  {
+    "device_id": "317622072917",
+    "name": "front_right15",
+    "port": 5002
+  },
+  {
+    "device_id": "943222070382",
+    "name": "front_right30",
+    "port": 5003
+  },
+  {
+    "device_id": "317622074693",
+    "name": "front_left15",
+    "port": 5004
+  },
+  {
+    "device_id": "944622074342",
+    "name": "front_left30",
+    "port": 5005
+  },
+  {
+    "device_id": "327122077410",
+    "name": "front_center",
+    "port": 5006
+  },
+  {
+    "device_id": "327122079081",
+    "name": "front_left45",
+    "port": 5007
+  }
+]

@@ -1,0 +1,3 @@
+[console_scripts]
+rfm-run-policy = rfm.policies.runner:main
+rfm-ur5-bridge = rfm.robots.ur5_bridge:main

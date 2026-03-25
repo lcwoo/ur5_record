@@ -91,6 +91,20 @@ PORT_CONFIG_MAP: Dict[str, DynamixelRobotConfig] = {
         joint_signs=(1, 1, -1, 1, 1, 1),
         gripper_config=(7, 26.34, -15.46),
     ),
+    # Gello (FTA2U0WN) — gello_get_offset.py 결과 반영
+    "/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTA2U0WN-if00-port0": DynamixelRobotConfig(
+        joint_ids=(1, 2, 3, 4, 5, 6),
+        joint_offsets=(
+            4 * np.pi / 2,
+            1 * np.pi / 2,
+            1 * np.pi / 2,
+            2 * np.pi / 2,
+            4 * np.pi / 2,
+            9 * np.pi / 2,
+        ),
+        joint_signs=(1, 1, -1, 1, 1, 1),
+        gripper_config=(7, 25.20, -16.60),
+    ),
     # Left UR
     "/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT7WBEIA-if00-port0": DynamixelRobotConfig(
         joint_ids=(1, 2, 3, 4, 5, 6),

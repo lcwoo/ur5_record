@@ -64,7 +64,7 @@ class UR5RTDEBridge(Node):
         # ROS2 parameters
         # ==================================================================
 
-        self.robot_ip = self.declare_parameter("robot_ip", "192.168.0.43").value
+        self.robot_ip = self.declare_parameter("robot_ip", "192.168.0.44").value
 
         # moveL parameters (Cartesian space)
         self.speed_l = float(self.declare_parameter("speed_l", 0.10).value)   # m/s
@@ -75,6 +75,13 @@ class UR5RTDEBridge(Node):
         self.accel_j = float(self.declare_parameter("accel_j", 1.0).value)    # rad/s²
 
         self.publish_rate = float(self.declare_parameter("publish_rate", 30.0).value)
+
+        # servoJ parameters (streaming joint control)
+        # Note: This is the mode you want for smooth teleop. It sends continuous
+        # joint targets rather than discrete moveJ motions.
+        self.servo_hz = float(self.declare_parameter("servo_hz", 100.0).value)
+        self.servo_lookahead_time = float(self.declare_parameter("servo_lookahead_time", 0.1).value)
+        self.servo_gain = int(self.declare_parameter("servo_gain", 300).value)
 
         # Gripper threshold: values above this are treated as "open".
         # Use 0.0 for a [-1, 1] command range, or 0.5 for a [0, 1] range.
@@ -142,6 +149,8 @@ class UR5RTDEBridge(Node):
         # ==================================================================
 
         self.pub_tcp_pose = self.create_publisher(PoseStamped, "/ur5/tcp_pose", 10)
+        # Joint state (used by teleop adapters to avoid opening an extra RTDEReceive connection)
+        self.pub_joint_state = self.create_publisher(JointState, "/ur5/joint_state", 10)
         self.pub_status = self.create_publisher(String, "/ur5/status", 10)
 
         # ==================================================================
@@ -166,6 +175,21 @@ class UR5RTDEBridge(Node):
             JointState, "/ur5/goal_joint_r", self._on_joint_rel, 10,
         )
 
+        # Streaming joint servo (servoJ). This enables smooth teleop.
+        self.sub_joint_servo = self.create_subscription(
+            JointState, "/ur5/servo_joint", self._on_joint_servo, 10,
+        )
+
+        # Latest servo target (thread-safe via _state_lock)
+        self._servo_target_q: Optional[Sequence[float]] = None
+        self._servo_active: bool = False
+        self._servo_last_ts: float = 0.0
+        self._servo_timeout_s: float = 0.5  # if no updates arrive, stop servoing
+        self._servo_err_last_log_ts: float = 0.0
+
+        if self.servo_hz > 0:
+            self.create_timer(1.0 / self.servo_hz, self._servo_tick)
+
         # ==================================================================
         # Subscribers — Gripper & text commands
         # ==================================================================
@@ -187,7 +211,9 @@ class UR5RTDEBridge(Node):
         # Pose database (JSON file on disk)
         # ==================================================================
 
-        self.pose_db_path = Path(__file__).resolve().parent / "ur5_saved_poses.json"
+        # Use repository-root pose DB so it is shared with other tools/scripts.
+        repo_root = Path(__file__).resolve().parents[2]
+        self.pose_db_path = repo_root / "ur5_saved_poses.json"
         self.pose_db: Dict[str, Dict] = {}
         self._load_pose_db()
 
@@ -206,10 +232,10 @@ class UR5RTDEBridge(Node):
         )
         self.get_logger().info(
             "Subscribing: /ur5/goal_tcp_pose, /ur5/goal_tcp_pose_r, "
-            "/ur5/goal_joint, /ur5/goal_joint_r, /ur5/gripper_cmd"
+            "/ur5/goal_joint, /ur5/goal_joint_r, /ur5/servo_joint, /ur5/gripper_cmd"
         )
         self.get_logger().info("Cmd topic: /ur5/cmd (where / list / save / go)")
-        self.get_logger().info("Publishing: /ur5/tcp_pose, /ur5/status")
+        self.get_logger().info("Publishing: /ur5/tcp_pose, /ur5/joint_state, /ur5/status")
 
     # ======================================================================
     # Initialization helpers
@@ -228,8 +254,8 @@ class UR5RTDEBridge(Node):
         self.get_logger().info("RTDE IO unavailable — attempting RobotiqGripper connection...")
 
         try:
-            # The gello_software package lives alongside this script
-            gello_path = Path(__file__).resolve().parent / "gello_software"
+            # gello_software lives at the repository root.
+            gello_path = Path(__file__).resolve().parents[2] / "gello_software"
             self.get_logger().info(f"Looking for gello_software at: {gello_path}")
             if not gello_path.exists():
                 self.get_logger().error(
@@ -294,7 +320,7 @@ class UR5RTDEBridge(Node):
     # ======================================================================
 
     def _publish_state(self):
-        """Publish current TCP pose and status at a fixed rate."""
+        """Publish current TCP pose, joint state, and status at a fixed rate."""
         try:
             pose = self.rtde_r.getActualTCPPose()  # [x, y, z, rx, ry, rz]
             x, y, z, rx, ry, rz = [float(v) for v in pose]
@@ -311,6 +337,22 @@ class UR5RTDEBridge(Node):
             msg.pose.orientation.z = float(qz)
             msg.pose.orientation.w = float(qw)
             self.pub_tcp_pose.publish(msg)
+
+            # Joint state (6-DoF UR arm joints, radians)
+            q = self.rtde_r.getActualQ()
+            jmsg = JointState()
+            jmsg.header.stamp = msg.header.stamp
+            # Names are optional for consumers; provide a conventional ordering.
+            jmsg.name = [
+                "shoulder_pan_joint",
+                "shoulder_lift_joint",
+                "elbow_joint",
+                "wrist_1_joint",
+                "wrist_2_joint",
+                "wrist_3_joint",
+            ]
+            jmsg.position = [float(v) for v in q]
+            self.pub_joint_state.publish(jmsg)
 
             self._publish_status()
         except Exception:
@@ -345,9 +387,17 @@ class UR5RTDEBridge(Node):
 
         def runner():
             try:
-                worker_fn()
+                result = worker_fn()
+                # RTDE motion APIs may return False without raising.
+                if result is False:
+                    self.get_logger().error(
+                        "Motion command returned False (robot did not execute the move). "
+                        "Check Remote mode / program run state / safety status."
+                    )
+                    self._log_rtde_state_snapshot()
             except Exception as e:
                 self.get_logger().error(f"Motion failed: {e}")
+                self._log_rtde_state_snapshot()
             finally:
                 with self._state_lock:
                     self._moving = False
@@ -355,6 +405,28 @@ class UR5RTDEBridge(Node):
 
         threading.Thread(target=runner, daemon=True).start()
         return True
+
+    def _log_rtde_state_snapshot(self):
+        """Best-effort RTDE state dump to diagnose silent motion rejections."""
+        parts = []
+        checks = [
+            ("isProgramRunning", "program_running"),
+            ("isProtectiveStopped", "protective_stopped"),
+            ("isEmergencyStopped", "emergency_stopped"),
+            ("isSteady", "is_steady"),
+            ("getRobotMode", "robot_mode"),
+            ("getSafetyMode", "safety_mode"),
+        ]
+        for method_name, label in checks:
+            fn = getattr(self.rtde_r, method_name, None)
+            if fn is None:
+                continue
+            try:
+                parts.append(f"{label}={fn()}")
+            except Exception:
+                continue
+        if parts:
+            self.get_logger().warn("[RTDE state] " + ", ".join(parts))
 
     # ======================================================================
     # Text command handler (/ur5/cmd)
@@ -434,6 +506,8 @@ class UR5RTDEBridge(Node):
                 # If RobotiqGripper is also available, log that RTDE IO was used
                 if self.robotiq_gripper is not None:
                     self.get_logger().debug("RTDE IO used (RobotiqGripper available as fallback)")
+                # RTDE IO succeeded; nothing else to do.
+                return
             except Exception as e:
                 self.get_logger().warn(f"RTDE IO gripper command failed: {e}")
 
@@ -723,6 +797,75 @@ class UR5RTDEBridge(Node):
 
         self._start_motion(worker, busy_msg="Robot is moving — ignoring /ur5/goal_joint_r.")
 
+    # ======================================================================
+    # servoJ callbacks (streaming joint space)
+    # ======================================================================
+
+    def _on_joint_servo(self, msg: JointState):
+        """Handle streaming joint target (servoJ)."""
+        q = self._joint_from_msg(msg)
+        if q is None:
+            self.get_logger().warn(
+                "/ur5/servo_joint requires JointState.position with at least 6 values."
+            )
+            return
+        now = self.get_clock().now().nanoseconds / 1e9
+        with self._state_lock:
+            self._servo_target_q = q
+            self._servo_last_ts = float(now)
+            self._servo_active = True
+
+    def _servo_tick(self):
+        """Periodic servoJ streaming loop for smooth teleop."""
+        try:
+            with self._state_lock:
+                if not self._servo_active or self._servo_target_q is None:
+                    return
+                age = (self.get_clock().now().nanoseconds / 1e9) - float(self._servo_last_ts)
+                q = list(self._servo_target_q)
+
+            # If commands stop coming, stop servo motion gently.
+            if age > self._servo_timeout_s:
+                with self._state_lock:
+                    self._servo_active = False
+                try:
+                    self.rtde_c.stopJ(0.5)
+                except Exception:
+                    pass
+                return
+
+            # servoJ signature in rtde_control:
+            # servoJ(q, speed, acceleration, time, lookahead_time, gain)
+            dt = 1.0 / max(1e-6, self.servo_hz)
+            # Some rtde_control builds don't accept keyword args; use positional.
+            # Also use initPeriod()/waitPeriod() for stable cycle timing when available.
+            try:
+                t_start = self.rtde_c.initPeriod()
+            except Exception:
+                t_start = None
+
+            self.rtde_c.servoJ(
+                q,
+                float(self.speed_j),
+                float(self.accel_j),
+                float(dt),
+                float(self.servo_lookahead_time),
+                int(self.servo_gain),
+            )
+
+            if t_start is not None:
+                try:
+                    self.rtde_c.waitPeriod(t_start)
+                except Exception:
+                    pass
+        except Exception as e:
+            # Avoid crashing the node if robot comm blips during streaming,
+            # but log occasionally so "not moving" isn't silent.
+            now = self.get_clock().now().nanoseconds / 1e9
+            if (now - float(self._servo_err_last_log_ts)) > 2.0:
+                self._servo_err_last_log_ts = float(now)
+                self.get_logger().warn(f"servoJ tick failed (will retry): {e}")
+
 
 # ===========================================================================
 # Entry point
@@ -736,7 +879,12 @@ def main():
         rclpy.spin(node)
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        # Guard: Ctrl+C can race shutdown in some environments.
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

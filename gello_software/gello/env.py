@@ -1,5 +1,5 @@
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
@@ -24,10 +24,12 @@ class RobotEnv:
         robot: Robot,
         control_rate_hz: float = 100.0,
         camera_dict: Optional[Dict[str, CameraDriver]] = None,
+        include_depth: bool = True,
     ) -> None:
         self._robot = robot
         self._rate = Rate(control_rate_hz)
         self._camera_dict = {} if camera_dict is None else camera_dict
+        self._include_depth = bool(include_depth)
 
     def robot(self) -> Robot:
         """Get the robot object.
@@ -63,11 +65,28 @@ class RobotEnv:
         Returns:
             obs: observation from the environment.
         """
-        observations = {}
-        for name, camera in self._camera_dict.items():
-            image, depth = camera.read()
-            observations[f"{name}_rgb"] = image
-            observations[f"{name}_depth"] = depth
+        observations: Dict[str, Any] = {}
+
+        # Read cameras in parallel so N cameras doesn't multiply latency by N.
+        # This matters a lot when a single camera is slow (USB bandwidth, exposure, etc.).
+        if len(self._camera_dict) > 0:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            def _read_one(item: Tuple[str, CameraDriver]):
+                name, camera = item
+                image, depth = camera.read()
+                return name, image, depth
+
+            items = list(self._camera_dict.items())
+            # Use up to N workers, but cap to avoid oversubscription.
+            max_workers = min(len(items), 16)
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                futs = [ex.submit(_read_one, it) for it in items]
+                for fut in as_completed(futs):
+                    name, image, depth = fut.result()
+                    observations[f"{name}_rgb"] = image
+                    if self._include_depth:
+                        observations[f"{name}_depth"] = depth
 
         robot_obs = self._robot.get_observations()
         assert "joint_positions" in robot_obs
