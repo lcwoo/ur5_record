@@ -52,10 +52,6 @@ tmux send-keys -t "${SESSION_NAME}:web" \
     --topic-prefix /rs \
     --bind 0.0.0.0 --port 8080 --jpeg-quality 80 --max-fps 15" C-m
 
-tmux new-window -t "${SESSION_NAME}" -n teleop
-tmux send-keys -t "${SESSION_NAME}:teleop" \
-  "${BASE_SETUP} && python -m ur5.teleop.gello_ros_teleop --robot-ip 192.168.0.44 --joint-topic /ur5/servo_joint --hz 30 --max-joint-step 0.03 --use-ros-joint-state --load-calib --calib-file /home/lcw/ur5_lerobot/gello_calibration.json --go-observe-on-start --observe-wait-s 5.0" C-m
-
 tmux select-window -t "${SESSION_NAME}:bridge"
 
 echo "Started tmux session: ${SESSION_NAME}"

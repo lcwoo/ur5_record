@@ -15,6 +15,11 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image, JointState
 from std_msgs.msg import Float64
 
+try:
+    import cv2
+except Exception:
+    cv2 = None
+
 
 def _img_to_np(msg: Image) -> np.ndarray:
     h, w = int(msg.height), int(msg.width)
@@ -27,6 +32,14 @@ def _img_to_np(msg: Image) -> np.ndarray:
     if msg.encoding in ("16UC1", "mono16"):
         arr = np.frombuffer(bytes(msg.data), dtype=np.uint16).reshape((h, w))
         return arr[:, :, None]
+    if msg.encoding == "yuv422":
+        if cv2 is None:
+            raise ValueError("Unsupported image encoding: yuv422 (OpenCV not available)")
+        # Interpret data as packed YUYV (YUV422) and convert to RGB.
+        # Each pixel uses 2 bytes (Y + alternating U/V), so shape is (h, w, 2).
+        arr = np.frombuffer(bytes(msg.data), dtype=np.uint8).reshape((h, w, 2))
+        rgb = cv2.cvtColor(arr, cv2.COLOR_YUV2RGB_YUY2)
+        return rgb
     raise ValueError(f"Unsupported image encoding: {msg.encoding}")
 
 
@@ -37,34 +50,62 @@ def _pose_to_pos_quat(msg: PoseStamped) -> np.ndarray:
 
 
 class _KeyReader:
-    """Non-blocking single-key reader for terminal (Linux)."""
+    """Non-blocking single-key reader for terminal (Linux).
+
+    Note: This class manipulates the terminal mode (cbreak). To avoid leaving
+    the terminal in a broken state when the process is interrupted (e.g. via
+    Ctrl+C), we store and restore the original termios settings.
+    """
 
     def __init__(self):
         self._stop = threading.Event()
         self.last_key: Optional[str] = None
         self._thread = threading.Thread(target=self._run, daemon=True)
+        # Terminal restore state
+        self._fd: Optional[int] = None
+        self._old_termios = None
 
     def start(self):
         self._thread.start()
 
     def stop(self):
+        # Signal the reader loop to stop and attempt to restore the terminal.
         self._stop.set()
+        self._restore_terminal()
+
+    def _restore_terminal(self):
+        """Best-effort restoration of the terminal mode."""
+        try:
+            if self._fd is not None and self._old_termios is not None:
+                import termios
+
+                termios.tcsetattr(self._fd, termios.TCSADRAIN, self._old_termios)
+        except Exception:
+            # If restoration fails, don't crash the process.
+            pass
+        finally:
+            self._fd = None
+            self._old_termios = None
 
     def _run(self):
         try:
             import termios
             import tty
 
-            fd = sys.stdin.fileno()
-            old = termios.tcgetattr(fd)
-            tty.setcbreak(fd)
+            self._fd = sys.stdin.fileno()
+            self._old_termios = termios.tcgetattr(self._fd)
+            tty.setcbreak(self._fd)
             try:
                 while not self._stop.is_set():
                     ch = sys.stdin.read(1)
                     if ch:
                         self.last_key = ch
+            except KeyboardInterrupt:
+                # Ensure we exit cleanly on Ctrl+C.
+                self._stop.set()
             finally:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                # Always try to restore the terminal before exiting the thread.
+                self._restore_terminal()
         except Exception:
             # Fallback: no key support
             return

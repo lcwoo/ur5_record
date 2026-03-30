@@ -47,3 +47,4 @@ octo/
 .Python
 # ignore nested local envs
 gello_software/.venv/
+data/

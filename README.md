@@ -10,6 +10,22 @@ UR5 + GELLO + RealSense 기반 데이터 수집/실행 레포입니다.
 cd /home/lcw/ur5_lerobot
 ./scripts/run_teleop_stack_tmux.sh ur5_teleop
 tmux attach -t ur5_teleop
+
+source /opt/ros/jazzy/setup.bash
+cd /home/lcw/ur5_lerobot
+source /home/lcw/ur5_lerobot/gello_software/.venv/bin/activate
+python -m ur5.data.ros_dataset_recorder \
+  --camera-map-file /home/lcw/ur5_lerobot/camera_port_map.json \
+  --topic-prefix /rs \
+  --robot-joint-topic /ur5/joint_state \
+  --robot-tcp-topic /ur5/tcp_pose \
+  --teleop-joint-cmd-topic /ur5/servo_joint \
+  --teleop-gripper-cmd-topic /ur5/gripper_cmd \
+  --out-dir /home/lcw/ur5_lerobot/data \
+  --task-name task_id \
+  --hz 30 \
+  --no-depth
+  
 ```
 
 창 이름:
@@ -71,18 +87,16 @@ python -m ur5.web.ros_mjpeg_server \
 ### 4) GELLO teleop (servo + fixed calib + observe start)
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd /home/lcw/ur5_lerobot
-source /home/lcw/ur5_lerobot/gello_software/.venv/bin/activate
-python -m ur5.teleop.gello_ros_teleop \
-  --robot-ip 192.168.0.44 \
-  --joint-topic /ur5/servo_joint \
-  --hz 30 \
-  --max-joint-step 0.03 \
-  --use-ros-joint-state \
-  --load-calib \
-  --calib-file /home/lcw/ur5_lerobot/gello_calibration.json \
-  --go-observe-on-start \
-  --observe-wait-s 5.0
+   /home/lcw/ur5_lerobot/gello_software/.venv/bin/python -m ur5.teleop.gello_ros_teleop \
+     --robot-ip 192.168.0.44 \
+     --joint-topic /ur5/servo_joint \
+     --hz 30 \
+     --max-joint-step 0.03 \
+     --use-ros-joint-state \
+     --load-calib \
+     --calib-file /home/lcw/ur5_lerobot/gello_calibration.json \
+     --go-observe-on-start \
+     --observe-wait-s 5.0
 ```
 
 ### 5) ROS dataset recorder
@@ -98,7 +112,7 @@ python -m ur5.data.ros_dataset_recorder \
   --teleop-joint-cmd-topic /ur5/servo_joint \
   --teleop-gripper-cmd-topic /ur5/gripper_cmd \
   --out-dir /home/lcw/ur5_lerobot/data \
-  --task-name pick_apple \
+  --task-name task_id \
   --hz 30 \
   --no-depth
 ```
