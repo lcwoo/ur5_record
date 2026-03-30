@@ -1,4 +1,4 @@
-# RFM (Robot Foundation Models)
+# UR5 Teleop/Data Stack
 
 UR5 + GELLO + RealSense 기반 데이터 수집/실행 레포입니다.
 
@@ -7,9 +7,9 @@ UR5 + GELLO + RealSense 기반 데이터 수집/실행 레포입니다.
 ## tmux로 한 번에 실행
 
 ```bash
-cd /home/lcw/RFM_lerobot
-./scripts/run_teleop_stack_tmux.sh
-tmux attach -t rfm_teleop
+cd /home/lcw/ur5_lerobot
+./scripts/run_teleop_stack_tmux.sh ur5_teleop
+tmux attach -t ur5_teleop
 ```
 
 창 이름:
@@ -18,11 +18,16 @@ tmux attach -t rfm_teleop
 - `web`
 - `teleop`
 
+주의/권장:
+- realsense-viewer는 실행 전에 닫아 주세요(디바이스 락 방지).
+- 카메라는 YUYV→RGB8 순으로 안정적으로 붙도록 설정되어 있습니다.
+- 필요 시 웹은 `http://<THIS_PC_IP>:8080/`에서 확인합니다.
+
 ### 1) UR5 bridge
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd /home/lcw/RFM_lerobot
-source /home/lcw/RFM_lerobot/gello_software/.venv/bin/activate
+cd /home/lcw/ur5_lerobot
+source /home/lcw/ur5_lerobot/gello_software/.venv/bin/activate
 python -m rfm.robots.ur5_bridge --ros-args \
   -p robot_ip:=192.168.0.44 \
   -p use_rtde_io:=false \
@@ -32,16 +37,20 @@ python -m rfm.robots.ur5_bridge --ros-args \
 ### 2) RealSense publisher (8 cams)
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd /home/lcw/RFM_lerobot
-source /home/lcw/RFM_lerobot/gello_software/.venv/bin/activate
-python -m rfm.cameras.realsense_ros_multi_publisher \
-  --camera-map-file /home/lcw/RFM_lerobot/camera_port_map.json \
+cd /home/lcw/ur5_lerobot
+source /home/lcw/ur5_lerobot/gello_software/.venv/bin/activate
+export PYTHONPATH=/home/lcw/ur5_lerobot/ur5:$PYTHONPATH
+python -m ur5.cameras.realsense_ros_multi_publisher \
+  --camera-map-file /home/lcw/ur5_lerobot/camera_port_map.json \
   --topic-prefix /rs \
-  --width 424 --height 240 --fps 6 \
-  --no-depth \
-  --allow-fallback \
-  --start-stagger-ms 1000 \
-  --start-retry-s 3.0
+  --width 640 --height 480 --fps 15 \
+  --no-depth --allow-fallback \
+  --special-cams front_center,front_left15,front_left30,front_left45,front_right15,front_right30,front_right45,wrist \
+  --special-format-order YUYV,RGB8 \
+  --special-timeout-ms 8000 \
+  --special-backoff-seq 1,2,4,8 \
+  --start-stagger-ms 2500 \
+  --start-retry-s 6.0
 ```
 
 참고: `wrist(D405)`는 환경에 따라 `424x240@5`로 fallback될 수 있습니다.
@@ -49,28 +58,29 @@ python -m rfm.cameras.realsense_ros_multi_publisher \
 ### 3) (옵션) 카메라 웹 뷰어
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd /home/lcw/RFM_lerobot
-source /home/lcw/RFM_lerobot/gello_software/.venv/bin/activate
-python -m rfm.web.ros_mjpeg_server \
-  --camera-map-file /home/lcw/RFM_lerobot/camera_port_map.json \
+cd /home/lcw/ur5_lerobot
+source /home/lcw/ur5_lerobot/gello_software/.venv/bin/activate
+export PYTHONPATH=/home/lcw/ur5_lerobot/ur5:$PYTHONPATH
+python -m ur5.web.ros_mjpeg_server \
+  --camera-map-file /home/lcw/ur5_lerobot/camera_port_map.json \
   --topic-prefix /rs \
-  --bind 0.0.0.0 --port 8080
+  --bind 0.0.0.0 --port 8080 --jpeg-quality 80 --max-fps 15
 ```
 브라우저: `http://<THIS_PC_IP>:8080/`
 
 ### 4) GELLO teleop (servo + fixed calib + observe start)
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd /home/lcw/RFM_lerobot
-source /home/lcw/RFM_lerobot/gello_software/.venv/bin/activate
-python -m rfm.teleop.gello_ros_teleop \
+cd /home/lcw/ur5_lerobot
+source /home/lcw/ur5_lerobot/gello_software/.venv/bin/activate
+python -m ur5.teleop.gello_ros_teleop \
   --robot-ip 192.168.0.44 \
   --joint-topic /ur5/servo_joint \
   --hz 30 \
   --max-joint-step 0.03 \
   --use-ros-joint-state \
   --load-calib \
-  --calib-file /home/lcw/RFM_lerobot/gello_calibration.json \
+  --calib-file /home/lcw/ur5_lerobot/gello_calibration.json \
   --go-observe-on-start \
   --observe-wait-s 5.0
 ```
@@ -78,16 +88,17 @@ python -m rfm.teleop.gello_ros_teleop \
 ### 5) ROS dataset recorder
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd /home/lcw/RFM_lerobot
-source /home/lcw/RFM_lerobot/gello_software/.venv/bin/activate
-python -m rfm.data.ros_dataset_recorder \
-  --camera-map-file /home/lcw/RFM_lerobot/camera_port_map.json \
+cd /home/lcw/ur5_lerobot
+source /home/lcw/ur5_lerobot/gello_software/.venv/bin/activate
+python -m ur5.data.ros_dataset_recorder \
+  --camera-map-file /home/lcw/ur5_lerobot/camera_port_map.json \
   --topic-prefix /rs \
   --robot-joint-topic /ur5/joint_state \
   --robot-tcp-topic /ur5/tcp_pose \
   --teleop-joint-cmd-topic /ur5/servo_joint \
   --teleop-gripper-cmd-topic /ur5/gripper_cmd \
-  --out-dir /home/lcw/RFM_lerobot/data/ros \
+  --out-dir /home/lcw/ur5_lerobot/data \
+  --task-name pick_apple \
   --hz 30 \
   --no-depth
 ```
@@ -97,8 +108,8 @@ python -m rfm.data.ros_dataset_recorder \
 - `ESC`: 종료
 
 저장 구조:
-- `/home/lcw/RFM_lerobot/data/ros/<run_timestamp>/episode_000/*.pkl`
-- `/home/lcw/RFM_lerobot/data/ros/<run_timestamp>/episode_001/*.pkl`
+- `/home/lcw/ur5_lerobot/data/ros/<run_timestamp>/episode_000/*.pkl`
+- `/home/lcw/ur5_lerobot/data/ros/<run_timestamp>/episode_001/*.pkl`
 
 카메라 키는 name 기반으로 저장됩니다:
 - 예: `wrist_rgb`, `front_center_rgb`, `front_left30_rgb`
@@ -106,9 +117,17 @@ python -m rfm.data.ros_dataset_recorder \
 ## 설치
 
 ```bash
-cd /home/lcw/RFM_lerobot
+cd /home/lcw/ur5_lerobot
 pip install -e .
 ```
+
+## 트러블슈팅
+- 카메라 프레임 미도착/타임아웃:
+  - realsense-viewer/republish 프로세스 종료 후 재시도
+  - 메인보드 USB 포트 직결, 케이블 교체/짧은 케이블 사용
+  - 낮은 모드에서 단일 확인: `--width 424 --height 240 --fps 15` 또는 `--fps 6`
+- MJPEG 미지원:
+  - 일부 장비/펌웨어에서 MJPEG가 광고되지 않습니다. 현재 기본은 YUYV→RGB8입니다.
 
 ## 자주 쓰는 /ur5/cmd
 
@@ -132,7 +151,7 @@ ros2 topic pub --once /ur5/cmd std_msgs/msg/String "{data: 'go observe'}"
 
 상세 파이프라인은 기존 스크립트를 사용하세요.
 - LeRobot 변환: `scripts/data/convert_to_lerobot.py`
-- 학습/실행: `rfm.policies.runner` 및 각 모델 레포 설정
+- 학습/실행: `ur5.policies.runner` 및 각 모델 레포 설정
 
 ## 프로젝트 구조
 

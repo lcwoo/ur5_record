@@ -28,7 +28,7 @@ from segment_anything import sam_model_registry, SamPredictor
 from cutie.inference.inference_core import InferenceCore
 from cutie.utils.get_default_model import get_default_model
 
-from rfm.utils.common import label_to_rgb
+from ur5.utils.common import label_to_rgb
 from std_srvs.srv import Trigger
 
 

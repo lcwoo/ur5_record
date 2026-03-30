@@ -7,7 +7,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import TransformStamped
 from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
 
-from rfm.utils import math as math_utils  # must provide mat_to_quat(R): returns (qx, qy, qz, qw)
+from ur5.utils import math as math_utils  # must provide mat_to_quat(R): returns (qx, qy, qz, qw)
 
 
 def build_T(vals):

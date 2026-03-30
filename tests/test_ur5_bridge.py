@@ -9,7 +9,7 @@ from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
 from rclpy.time import Time
-from rfm.utils.math import quat_to_mat, mat_to_quat, mat_to_rotvec, rotvec_to_mat
+from ur5.utils.math import quat_to_mat, mat_to_quat, mat_to_rotvec, rotvec_to_mat
 
 import json
 import os
