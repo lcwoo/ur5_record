@@ -22,9 +22,6 @@ setup(
     install_requires=requirements,
     entry_points={
         "console_scripts": [
-            # Keep legacy names for compatibility; add UR5-prefixed aliases
-            "rfm-run-policy=ur5.policies.runner:main",
-            "rfm-ur5-bridge=ur5.robots.ur5_bridge:main",
             "ur5-run-policy=ur5.policies.runner:main",
             "ur5-bridge=ur5.robots.ur5_bridge:main",
         ],

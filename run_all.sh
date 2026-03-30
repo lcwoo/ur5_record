@@ -5,11 +5,11 @@ set -euo pipefail
 # Usage:
 #   ./run_all.sh [task_name] [session_name]
 # Example:
-#   ./run_all.sh pick_and_place rfm_all
+#   ./run_all.sh pick_and_place ur5_all
 
-ROOT_DIR="/home/lcw/RFM_lerobot"
-VENV="/home/lcw/RFM_lerobot/gello_software/.venv/bin/activate"
-SESSION_NAME="${2:-rfm_all}"
+ROOT_DIR="/home/lcw/ur5_lerobot"
+VENV="/home/lcw/ur5_lerobot/gello_software/.venv/bin/activate"
+SESSION_NAME="${2:-ur5_all}"
 
 TASK_NAME="${1:-}"
 if [[ -z "${TASK_NAME}" ]]; then
@@ -35,27 +35,27 @@ if tmux has-session -t "${SESSION_NAME}" 2>/dev/null; then
   exit 1
 fi
 
-BASE_SETUP="export ROS_DOMAIN_ID=0 && source /opt/ros/jazzy/setup.bash && cd ${ROOT_DIR} && source ${VENV}"
+BASE_SETUP="export ROS_DOMAIN_ID=0 && source /opt/ros/jazzy/setup.bash && cd ${ROOT_DIR} && source ${VENV} && export PYTHONPATH=${ROOT_DIR}/ur5:$PYTHONPATH"
 
 tmux new-session -d -s "${SESSION_NAME}" -n bridge
 tmux send-keys -t "${SESSION_NAME}:bridge" \
-  "${BASE_SETUP} && python -m rfm.robots.ur5_bridge --ros-args -p robot_ip:=192.168.0.44 -p use_rtde_io:=false -p force_robotiq_gripper:=true" C-m
+  "${BASE_SETUP} && python -m ur5.robots.ur5_bridge --ros-args -p robot_ip:=192.168.0.44 -p use_rtde_io:=false -p force_robotiq_gripper:=true" C-m
 
 tmux new-window -t "${SESSION_NAME}" -n camera
 tmux send-keys -t "${SESSION_NAME}:camera" \
-  "${BASE_SETUP} && python -m rfm.cameras.realsense_ros_multi_publisher --camera-map-file ${ROOT_DIR}/camera_ros_map.json --topic-prefix /rs --width 424 --height 240 --fps 15 --strict-profile --no-depth --start-stagger-ms 300" C-m
+  "${BASE_SETUP} && python -m ur5.cameras.realsense_ros_multi_publisher --camera-map-file ${ROOT_DIR}/camera_ros_map.json --topic-prefix /rs --width 424 --height 240 --fps 15 --strict-profile --no-depth --start-stagger-ms 300" C-m
 
 tmux new-window -t "${SESSION_NAME}" -n web
 tmux send-keys -t "${SESSION_NAME}:web" \
-  "${BASE_SETUP} && python -m rfm.web.ros_mjpeg_server --camera-map-file ${ROOT_DIR}/camera_ros_map.json --topic-prefix /rs --bind 0.0.0.0 --port 8080" C-m
+  "${BASE_SETUP} && python -m ur5.web.ros_mjpeg_server --camera-map-file ${ROOT_DIR}/camera_ros_map.json --topic-prefix /rs --bind 0.0.0.0 --port 8080" C-m
 
 tmux new-window -t "${SESSION_NAME}" -n teleop
 tmux send-keys -t "${SESSION_NAME}:teleop" \
-  "${BASE_SETUP} && python -m rfm.teleop.gello_ros_teleop --robot-ip 192.168.0.44 --joint-topic /ur5/servo_joint --hz 30 --max-joint-step 0.03 --use-ros-joint-state --load-calib --calib-file ${ROOT_DIR}/gello_calibration.json --go-observe-on-start --observe-wait-s 5.0" C-m
+  "${BASE_SETUP} && python -m ur5.teleop.gello_ros_teleop --robot-ip 192.168.0.44 --joint-topic /ur5/servo_joint --hz 30 --max-joint-step 0.03 --use-ros-joint-state --load-calib --calib-file ${ROOT_DIR}/gello_calibration.json --go-observe-on-start --observe-wait-s 5.0" C-m
 
 tmux new-window -t "${SESSION_NAME}" -n record
 tmux send-keys -t "${SESSION_NAME}:record" \
-  "${BASE_SETUP} && python -m rfm.data.ros_dataset_recorder --camera-map-file ${ROOT_DIR}/camera_ros_map.json --topic-prefix /rs --robot-joint-topic /ur5/joint_state --robot-tcp-topic /ur5/tcp_pose --teleop-joint-cmd-topic /ur5/servo_joint --teleop-gripper-cmd-topic /ur5/gripper_cmd --out-dir ${OUT_DIR} --task-name ${TASK_NAME} --hz 30 --no-depth" C-m
+  "${BASE_SETUP} && python -m ur5.data.ros_dataset_recorder --camera-map-file ${ROOT_DIR}/camera_ros_map.json --topic-prefix /rs --robot-joint-topic /ur5/joint_state --robot-tcp-topic /ur5/tcp_pose --teleop-joint-cmd-topic /ur5/servo_joint --teleop-gripper-cmd-topic /ur5/gripper_cmd --out-dir ${OUT_DIR} --task-name ${TASK_NAME} --hz 30 --no-depth" C-m
 
 tmux select-window -t "${SESSION_NAME}:bridge"
 

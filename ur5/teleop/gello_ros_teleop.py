@@ -3,13 +3,13 @@
 GELLO -> UR5 (via ROS2 bridge) teleoperation adapter.
 
 This node reads the GELLO leader device (Dynamixel) and publishes UR5 joint
-targets to the ROS2 topics consumed by `rfm.robots.ur5_bridge`:
+targets to the ROS2 topics consumed by `ur5.robots.ur5_bridge`:
 
   - /ur5/goal_joint   (sensor_msgs/JointState)  absolute joint targets (rad)
   - /ur5/gripper_cmd  (std_msgs/Float64)        simple gripper command
 
 Important:
-  - Start `python -m rfm.robots.ur5_bridge` first.
+  - Start `python -m ur5.robots.ur5_bridge` first.
   - This node does NOT connect to the robot via RTDEControl (so it won't fight
     the bridge). It only opens a read-only RTDEReceive connection to get the
     current joint state for rate limiting and auto-calibration.
@@ -22,6 +22,7 @@ import glob
 import json
 import time
 from pathlib import Path
+import sys
 from typing import Optional
 
 import numpy as np
@@ -85,7 +86,7 @@ def parse_args():
         "--joint-topic",
         type=str,
         default="/ur5/goal_joint",
-        help="Joint command topic. Default is /ur5/goal_joint (supported by rfm.robots.ur5_bridge). "
+        help="Joint command topic. Default is /ur5/goal_joint (supported by ur5.robots.ur5_bridge). "
              "If your bridge supports streaming servo control, you can set this to /ur5/servo_joint.",
     )
     p.add_argument(
@@ -220,6 +221,11 @@ class GelloRosTeleop(Node):
         if self.go_observe_on_start:
             self._go_observe_before_start()
 
+        # Make sure local gello_software is importable when running from repo root.
+        gello_path = Path(__file__).resolve().parents[2] / "gello_software"
+        if gello_path.exists():
+            sys.path.insert(0, str(gello_path))
+
         # Instantiate GELLO agent (Dynamixel leader).
         # Calibration modes:
         # - default: auto-calibrate GELLO offsets so the current leader reading maps to current robot_q
@@ -335,7 +341,7 @@ class GelloRosTeleop(Node):
         if self._latest_robot_q is None:
             raise RuntimeError(
                 f"Timed out waiting for /ur5/joint_state ({timeout_s:.1f}s). "
-                "Is `rfm.robots.ur5_bridge` running and publishing?"
+                "Is `ur5.robots.ur5_bridge` running and publishing?"
             )
 
     def _get_robot_q(self) -> np.ndarray:

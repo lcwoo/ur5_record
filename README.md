@@ -28,7 +28,7 @@ tmux attach -t ur5_teleop
 source /opt/ros/jazzy/setup.bash
 cd /home/lcw/ur5_lerobot
 source /home/lcw/ur5_lerobot/gello_software/.venv/bin/activate
-python -m rfm.robots.ur5_bridge --ros-args \
+python -m ur5.robots.ur5_bridge --ros-args \
   -p robot_ip:=192.168.0.44 \
   -p use_rtde_io:=false \
   -p force_robotiq_gripper:=true

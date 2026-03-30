@@ -1,4 +1,0 @@
-[console_scripts]
-rfm-ros-record = rfm.data.ros_dataset_recorder:main
-rfm-rs-pub = rfm.cameras.realsense_ros_multi_publisher:main
-rfm-web = rfm.web.ros_mjpeg_server:main

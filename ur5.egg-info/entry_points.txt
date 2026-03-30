@@ -1,5 +1,0 @@
-[console_scripts]
-rfm-run-policy = ur5.policies.runner:main
-rfm-ur5-bridge = ur5.robots.ur5_bridge:main
-ur5-bridge = ur5.robots.ur5_bridge:main
-ur5-run-policy = ur5.policies.runner:main

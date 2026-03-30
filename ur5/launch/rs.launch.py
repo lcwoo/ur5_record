@@ -28,7 +28,7 @@ def launch_setup(context, *args, **kwargs):
         wrist = True
         top = True
 
-    share = Path(get_package_share_directory('rfm'))
+    share = Path(get_package_share_directory('ur5'))
     yaml_path = share/ 'configs/camera_serials.yaml'
     with open(yaml_path, "r") as f:
         serials = yaml.safe_load(f)

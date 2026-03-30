@@ -1,5 +1,0 @@
-policies
-rfm
-robots
-teleop
-utils

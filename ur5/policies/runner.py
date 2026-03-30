@@ -3,7 +3,7 @@
 Inference script for running learned policies (SmolVLA or Octo) on a UR5 robot.
 
 Architecture:
-  rfm.robots.ur5_bridge  (runs in a separate terminal)
+  ur5.robots.ur5_bridge  (runs in a separate terminal)
      ↑ /ur5/goal_joint  (JointState — absolute joint targets)
      ↓ /ur5/status       (String — "IDLE" / "MOVING")
   This script  (ROS2 node)
@@ -14,24 +14,24 @@ Architecture:
 
 Usage:
   # Terminal 1 — start the bridge
-  source /opt/ros/humble/setup.bash && cd /home/lcw/RFM && source venv/bin/activate
-  python -m rfm.robots.ur5_bridge
-  # 또는: rfm-ur5-bridge (pip install -e . 후)
+  source /opt/ros/jazzy/setup.bash && cd /home/lcw/ur5_lerobot && source gello_software/.venv/bin/activate
+  python -m ur5.robots.ur5_bridge
+  # 또는: ur5-bridge (pip install -e . 후)
 
   # Terminal 2 — run SmolVLA policy
-  source /opt/ros/humble/setup.bash && cd /home/lcw/RFM && source venv/bin/activate
-  python -m rfm.policies.runner --model-type smolvla \\
+  source /opt/ros/jazzy/setup.bash && cd /home/lcw/ur5_lerobot && source gello_software/.venv/bin/activate
+  python -m ur5.policies.runner --model-type smolvla \\
       --checkpoint outputs/train/eggplant/checkpoints/020000/pretrained_model
-  # 또는: rfm-run-policy --model-type smolvla ... (pip install -e . 후)
+  # 또는: ur5-run-policy --model-type smolvla ... (pip install -e . 후)
 
   # Terminal 2 — run Octo policy
-  python -m rfm.policies.runner --model-type octo \\
+  python -m ur5.policies.runner --model-type octo \\
       --checkpoint /home/lcw/RFM/outputs/octo_finetune/.../5000 \\
       --task "Pick up the eggplant and place it on the plate." \\
       --window-size 2 --exec-horizon 1
 
   # Dry-run (model-only test — no robot, camera, or ROS2 required)
-  python -m rfm.policies.runner --model-type octo --dry-run \\
+  python -m ur5.policies.runner --model-type octo --dry-run \\
       --checkpoint /home/lcw/RFM/outputs/octo_finetune/.../5000
 
 Gripper notes:
